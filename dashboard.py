@@ -17,8 +17,9 @@ from matplotlib.colors import LinearSegmentedColormap
 import shutil
 import atexit
 import re
-import math
 import io
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 # Suppress warnings for cleaner Streamlit output
 warnings.filterwarnings("ignore")
@@ -51,6 +52,9 @@ st.sidebar.header("Dashboard Controls")
 
 # Define available years
 years = [2019, 2020, 2021, 2022, 2023]
+
+# Removed the multiselect for filtering charts
+# If you have other controls, you can add them here
 
 # Separate selection for map comparisons
 st.sidebar.header("Map Year Selection")
@@ -231,6 +235,7 @@ def load_data(export_folder='GEE_exports'):
     feature_importances_path = os.path.join(export_folder, 'feature_importances.csv')
     scatter_plot_path = os.path.join(export_folder, 'scatter_plot_data.csv')
     trend_df_path = os.path.join(export_folder, 'agb_trend.csv')
+    # prediction_path is no longer needed since we'll compute it dynamically
     
     # Load CSVs if they exist; otherwise, return empty DataFrames
     mangrove_df = pd.read_csv(mangrove_path) if os.path.exists(mangrove_path) else pd.DataFrame()
@@ -238,8 +243,9 @@ def load_data(export_folder='GEE_exports'):
     feature_importances_df = pd.read_csv(feature_importances_path) if os.path.exists(feature_importances_path) else pd.DataFrame()
     scatter_df = pd.read_csv(scatter_plot_path) if os.path.exists(scatter_plot_path) else pd.DataFrame()
     trend_df = pd.read_csv(trend_df_path) if os.path.exists(trend_df_path) else pd.DataFrame()
+    # prediction_df will be computed dynamically
     
-    return mangrove_df, agb_df, feature_importances_df, scatter_df, trend_df
+    return mangrove_df, agb_df, feature_importances_df, scatter_df, trend_df  # Removed prediction_df
 
 # Load data
 export_folder = 'GEE_exports'
@@ -408,7 +414,7 @@ except Exception as e:
 
 # ----------------------------- Charts Section ----------------------------- #
 
-st.header("Mangrove and Biomass Trends")
+st.header("Mangrove and Biomass Trends Prediction")
 
 # Create two columns for side-by-side bar charts
 col1, col2 = st.columns(2, gap="large")
@@ -475,6 +481,176 @@ with col2:
     else:
         st.write("No AGB data available.")
 
+# ----------------------------- New 2024 Prediction Sections ----------------------------- #
+
+# ### Addition: Compute 2024 AGB Prediction
+# Since `agb_prediction_2024.csv` is not available, we'll compute the prediction based on existing AGB data and trend.
+
+if not trend_df.empty and not agb_df.empty:
+    try:
+        # Extract trend percentage
+        trend_percent = trend_df['Trend Percentage (%/year)'].iloc[0]
+        
+        # Get the latest year's AGB
+        latest_year_agb = agb_df['Year'].max()
+        agb_latest = agb_df.loc[agb_df['Year'] == latest_year_agb, 'AGB (C Ton)'].values[0]
+        
+        # Calculate predicted AGB for 2024
+        predicted_year_agb = latest_year_agb + 1
+        predicted_agb = agb_latest * (1 + trend_percent / 100)
+        
+        # Create prediction DataFrame
+        agb_prediction_df = pd.DataFrame({
+            'Year': [predicted_year_agb],
+            'Predicted AGB (C Ton)': [predicted_agb]
+        })
+    except Exception as e:
+        st.error(f"Error computing 2024 AGB prediction: {e}")
+        agb_prediction_df = pd.DataFrame()
+else:
+    st.warning("Insufficient data to compute 2024 AGB prediction.")
+    agb_prediction_df = pd.DataFrame()
+
+# ### Addition: Compute 2024 Mangrove Area Prediction
+# We'll use Linear Regression to predict the Mangrove Area for 2024 based on historical data.
+
+if not mangrove_df.empty and len(mangrove_df) >= 2:
+    try:
+        # Prepare data for regression
+        X_mangrove = mangrove_df[['Year']]
+        y_mangrove = mangrove_df['Mangrove Area (Ha)']
+        
+        # Initialize and fit the model
+        model_mangrove = LinearRegression()
+        model_mangrove.fit(X_mangrove, y_mangrove)
+        
+        # Predict for 2024
+        predicted_year_mangrove = mangrove_df['Year'].max() + 1
+        predicted_mangrove_area = model_mangrove.predict([[predicted_year_mangrove]])[0]
+        
+        # Create prediction DataFrame
+        mangrove_prediction_df = pd.DataFrame({
+            'Year': [predicted_year_mangrove],
+            'Predicted Mangrove Area (Ha)': [predicted_mangrove_area]
+        })
+    except Exception as e:
+        st.error(f"Error computing 2024 Mangrove Area prediction: {e}")
+        mangrove_prediction_df = pd.DataFrame()
+else:
+    st.warning("Insufficient data to compute 2024 Mangrove Area prediction.")
+    mangrove_prediction_df = pd.DataFrame()
+
+# ----------------------------- Prediction Visualization ----------------------------- #
+
+# ### Addition: AGB Prediction Visualization
+
+st.header("AGB Prediction for 2024")
+
+if not agb_prediction_df.empty:
+    try:
+        predicted_year_agb = agb_prediction_df['Year'].iloc[0]
+        predicted_agb = agb_prediction_df['Predicted AGB (C Ton)'].iloc[0]
+        
+        # Display Predicted AGB as a Metric
+        st.subheader(f"Predicted AGB for {predicted_year_agb}")
+        st.markdown(f"""
+        <div style="background-color:#181d27; padding: 20px; border-radius: 10px; color: white;">
+            <h2 style="text-align:center;">{predicted_agb:,.2f} C Ton/Ha</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Combine Historical and Prediction Data for Visualization
+        combined_agb_df = agb_df.copy()
+        # Replace .append() with pd.concat()
+        combined_agb_df = pd.concat([
+            combined_agb_df,
+            pd.DataFrame({'Year': [predicted_year_agb], 'AGB (C Ton)': [predicted_agb]})
+        ], ignore_index=True)
+        combined_agb_df = combined_agb_df.sort_values('Year')
+        fig_prediction = px.line(
+            combined_agb_df,
+            x='Year',
+            y='AGB (C Ton)',
+            title='AGB Trend with 2024 Prediction',
+            markers=True,
+            labels={'AGB (C Ton)': 'AGB (C Ton/Ha)', 'Year': 'Year'},
+            template='plotly_white'
+        )
+        fig_prediction.add_vline(x=predicted_year_agb, line_dash="dash", line_color="red")
+        fig_prediction.add_annotation(
+            x=predicted_year_agb,
+            y=predicted_agb,
+            text="2024 Prediction",
+            showarrow=True,
+            arrowhead=1
+        )
+        fig_prediction.update_layout(
+            title=dict(x=0.5),
+            xaxis=dict(tickmode='linear'),
+            yaxis=dict(showgrid=True, gridcolor='lightgrey'),
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_prediction, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error displaying the 2024 AGB prediction: {e}")
+else:
+    st.warning("No AGB prediction data available for 2024.")
+
+# ### Addition: Mangrove Area Prediction Visualization
+
+st.header("Mangrove Area Prediction for 2024")
+
+if not mangrove_prediction_df.empty:
+    try:
+        predicted_year_mangrove = mangrove_prediction_df['Year'].iloc[0]
+        predicted_mangrove_area = mangrove_prediction_df['Predicted Mangrove Area (Ha)'].iloc[0]
+        
+        # Display Predicted Mangrove Area as a Metric
+        st.subheader(f"Predicted Mangrove Area for {predicted_year_mangrove}")
+        st.markdown(f"""
+        <div style="background-color:#181d27; padding: 20px; border-radius: 10px; color: white;">
+            <h2 style="text-align:center;">{predicted_mangrove_area:,.2f} Ha</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Combine Historical and Prediction Data for Visualization
+        combined_mangrove_df = mangrove_df.copy()
+        # Replace .append() with pd.concat()
+        combined_mangrove_df = pd.concat([
+            combined_mangrove_df,
+            pd.DataFrame({'Year': [predicted_year_mangrove], 'Mangrove Area (Ha)': [predicted_mangrove_area]})
+        ], ignore_index=True)
+        combined_mangrove_df = combined_mangrove_df.sort_values('Year') 
+        fig_mangrove_prediction = px.line(
+            combined_mangrove_df,
+            x='Year',
+            y='Mangrove Area (Ha)',
+            title='Mangrove Area Trend with 2024 Prediction',
+            markers=True,
+            labels={'Mangrove Area (Ha)': 'Mangrove Area (Ha)', 'Year': 'Year'},
+            template='plotly_white'
+        )
+        fig_mangrove_prediction.add_vline(x=predicted_year_mangrove, line_dash="dash", line_color="red")
+        fig_mangrove_prediction.add_annotation(
+            x=predicted_year_mangrove,
+            y=predicted_mangrove_area,
+            text="2024 Prediction",
+            showarrow=True,
+            arrowhead=1
+        )
+        fig_mangrove_prediction.update_layout(
+            title=dict(x=0.5),
+            xaxis=dict(tickmode='linear'),
+            yaxis=dict(showgrid=True, gridcolor='lightgrey'),
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_mangrove_prediction, use_container_width=True)        
+    except Exception as e:
+        st.error(f"Error displaying the 2024 Mangrove Area prediction: {e}")
+else:
+    st.warning("No Mangrove Area prediction data available for 2024.")
+
 # ----------------------------- Model Validation ----------------------------- #
 
 st.header("Model Validation: AGB Reference vs Prediction")
@@ -493,12 +669,37 @@ if not scatter_df.empty:
             template='plotly_white',
             hover_data=filtered_scatter_df.columns
         )
+        
+        # Update layout for better aesthetics
         fig_scatter.update_layout(
             title=dict(x=0.5),
             xaxis=dict(showgrid=True, gridcolor='lightgrey'),
             yaxis=dict(showgrid=True, gridcolor='lightgrey'),
             plot_bgcolor='rgba(0,0,0,0)'
         )
+        
+        # Compute minimum and maximum values across both axes
+        min_val = min(filtered_scatter_df['AGB'].min(), filtered_scatter_df['Prediction'].min())
+        max_val = max(filtered_scatter_df['AGB'].max(), filtered_scatter_df['Prediction'].max())
+        
+        # Add 1:1 reference line (Red dashed line)
+        fig_scatter.add_shape(
+            type="line",
+            x0=min_val,
+            y0=min_val,
+            x1=max_val,
+            y1=max_val,
+            line=dict(color="Red", dash="dash"),
+        )
+        
+        # Optionally, adjust the axis ranges to add padding
+        padding = (max_val - min_val) * 0.05  # 5% padding
+        fig_scatter.update_layout(
+            xaxis=dict(range=[min_val - padding, max_val + padding]),
+            yaxis=dict(range=[min_val - padding, max_val + padding]),
+        )
+        
+        # Display the scatter plot with the reference line
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
         st.write("No scatter plot data available.")
@@ -549,7 +750,6 @@ else:
 st.sidebar.subheader("Model Performance")
 if not scatter_df.empty:
     try:
-        from sklearn.metrics import r2_score
         filtered_scatter_df = scatter_df
         
         if not filtered_scatter_df.empty:
@@ -564,7 +764,7 @@ else:
 
 # ----------------------------- AGB Trend Information ----------------------------- #
 
-st.subheader("AGB Trend")
+st.subheader("AGB Trend Prediction")
 if not trend_df.empty:
     try:
         trend_per_year = trend_df['Trend (Ton/year)'].iloc[0]
@@ -580,7 +780,8 @@ if not trend_df.empty:
             final_year = agb_df_sorted['Year'].iloc[-1]
         else:
             initial_agb = final_agb = total_change = initial_year = final_year = None
-        
+
+
         # Create a container for the AGB Trend Overview
         with st.container():
             # Header with Emoji
@@ -592,14 +793,14 @@ if not trend_df.empty:
                 st.markdown(f"""
                 <div style="background-color:#181d27; padding: 20px; border-radius: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
                     <h4 style="text-align:center;">AGB Trend (Ton/year)</h4>
-                    <p style="font-size:24px; font-weight:bold; text-align:center;">{trend_per_year:,.2f} Ton/year</p>
+                    <p style="font-size:24px; font-weight:bold; text-align:center;">{trend_per_year:,.3f} Ton/year</p>
                 </div>
                 """, unsafe_allow_html=True)
             with col2:
                 st.markdown(f"""
                 <div style="background-color:#181d27; padding: 20px; border-radius: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
                     <h4 style="text-align:center;">AGB Trend Percentage (%/year)</h4>
-                    <p style="font-size:24px; font-weight:bold; text-align:center;">{trend_percent_per_year:.2f}%/year</p>
+                    <p style="font-size:24px; font-weight:bold; text-align:center;">{trend_percent_per_year:.3f}%/year</p>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -630,7 +831,31 @@ if not trend_df.empty:
                     """, unsafe_allow_html=True)
             else:
                 st.warning("Insufficient data to compute additional statistics.")
-    
+        
+        #2024
+        if not agb_prediction_df.empty and not mangrove_prediction_df.empty:
+            predicted_year_agb = agb_prediction_df['Year'].iloc[0]
+            predicted_agb = agb_prediction_df['Predicted AGB (C Ton)'].iloc[0]
+            predicted_year_mangrove = mangrove_prediction_df['Year'].iloc[0]
+            predicted_mangrove_area = mangrove_prediction_df['Predicted Mangrove Area (Ha)'].iloc[0]
+            
+            st.markdown("")
+            prediction_col1, prediction_col2 = st.columns(2)
+            with prediction_col1:
+                st.markdown(f"""
+                <div style="background-color:#181d27; padding: 20px; border-radius: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
+                    <h4 style="text-align:center;">Predicted AGB for {predicted_year_agb}</h4>
+                    <p style="font-size:20px; font-weight:bold; text-align:center;">{predicted_agb:,.2f} Ton</p>
+                </div>
+                """, unsafe_allow_html=True)
+            with prediction_col2:
+                st.markdown(f"""
+                <div style="background-color:#181d27; padding: 20px; border-radius: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
+                    <h4 style="text-align:center;">Predicted Mangrove Area for {predicted_year_mangrove}</h4>
+                    <p style="font-size:20px; font-weight:bold; text-align:center;">{predicted_mangrove_area:,.2f} Ha</p>
+                </div>
+                """, unsafe_allow_html=True)
+        
     except Exception as e:
         st.error(f"Error displaying AGB trend information: {e}")
 else:
@@ -638,60 +863,24 @@ else:
 
 # ----------------------------- Additional Enhancements ----------------------------- #
 
-# Optional: AGB Trend Line Chart
-st.header("AGB Trend Over Time")
-if not agb_df.empty:
-    try:
-        agb_df_sorted = agb_df.sort_values('Year')
-        fig3 = px.line(
-            agb_df_sorted,
-            x='Year',
-            y='AGB (C Ton)',
-            title='AGB Trend Over Time',
-            markers=True,
-            labels={'AGB (C Ton)': 'AGB (C Ton)', 'Year': 'Year'},
-            template='plotly_white'
-        )
-        fig3.update_layout(
-            title=dict(x=0.5),
-            xaxis=dict(tickmode='linear'),
-            yaxis=dict(showgrid=True, gridcolor='lightgrey'),
-            plot_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-    except Exception as e:
-        st.error(f"Error generating AGB Trend Over Time chart: {e}")
-else:
-    st.write("No AGB trend data available.")
-
-# Optional: AGB Trend Percentage Line Chart
-st.header("AGB Trend Percentage Over Time")
-if len(agb_df) >= 2:
-    try:
-        agb_df_sorted = agb_df.sort_values('Year').reset_index(drop=True)
-        agb_df_sorted['AGB Change (%)'] = agb_df_sorted['AGB (C Ton)'].pct_change() * 100
-        agb_df_sorted = agb_df_sorted.dropna()  # Remove NaN from first row
-        
-        fig4 = px.line(
-            agb_df_sorted,
-            x='Year',
-            y='AGB Change (%)',
-            title='AGB Trend Percentage Over Time',
-            markers=True,
-            labels={'AGB Change (%)': 'AGB Change (%)', 'Year': 'Year'},
-            template='plotly_white'
-        )
-        fig4.update_layout(
-            title=dict(x=0.5),
-            xaxis=dict(tickmode='linear'),
-            yaxis=dict(showgrid=True, gridcolor='lightgrey'),
-            plot_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig4, use_container_width=True)
-    except Exception as e:
-        st.error(f"Error generating AGB Trend Percentage Over Time chart: {e}")
-else:
-    st.write("Insufficient data for AGB trend percentage.")
+# **Removed the following section:**
+# 
+# ```python
+# st.header("AGB Trends Prediction: Over Time and Percentage Change")
+# 
+# # Create two columns for the side-by-side layout
+# col1, col2 = st.columns(2, gap="large")
+# 
+# # AGB Trend Over Time
+# with col1:
+#     st.subheader("AGB Trend Over Time")
+#     # Existing code...
+# 
+# # AGB Trend Percentage Over Time
+# with col2:
+#     st.subheader("AGB Trend Percentage Over Time")
+#     # Existing code...
+# ```
 
 # ----------------------------- Download Options ----------------------------- #
 
@@ -732,6 +921,30 @@ if not scatter_df.empty:
     )
 else:
     st.write("No scatter plot data available for download.")
+
+# ### Addition: Download Prediction Data
+# Allow users to download the dynamically generated 2024 prediction data.
+
+if not agb_prediction_df.empty:
+    csv_agb_prediction = agb_prediction_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download 2024 AGB Prediction Data as CSV",
+        data=csv_agb_prediction,
+        file_name='agb_prediction_2024.csv',
+        mime='text/csv',
+    )
+else:
+    st.write("No AGB prediction data available for download.")
+if not mangrove_prediction_df.empty:
+    csv_mangrove_prediction = mangrove_prediction_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download 2024 Mangrove Area Prediction Data as CSV",
+        data=csv_mangrove_prediction,
+        file_name='mangrove_area_prediction_2024.csv',
+        mime='text/csv',
+    )
+else:
+    st.write("No Mangrove Area prediction data available for download.")
 
 # ----------------------------- Cleanup Temporary Files ----------------------------- #
 
