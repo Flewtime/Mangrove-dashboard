@@ -25,14 +25,12 @@ from sklearn.metrics import r2_score
 warnings.filterwarnings("ignore")
 
 # ----------------------------- Initialization ----------------------------- #
-# Configure Streamlit page
 st.set_page_config(
     page_title="Mangrove Analysis Dashboard in Taman Nasional Sembilang, South Sumatera, Indonesia from 2019 to 2023",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Initialize session state variables
 if 'map_center' not in st.session_state:
     st.session_state.map_center = [-1.9, 105]
 if 'zoom_level' not in st.session_state:
@@ -48,8 +46,6 @@ if 'temp_dir' not in st.session_state:
 
 # Title
 st.title("Mangrove Analysis Dashboard in Taman Nasional Sembilang, South Sumatera, Indonesia from 2019 to 2023")
-
-# Enhanced Description with Dataset References
 st.markdown("""
 This dashboard presents the analysis of mangrove cover and biomass in **Taman Nasional Sembilang**, South Sumatera, Indonesia from **2019 to 2023**. Utilizing a **Random Forest** model, the dashboard predicts Above-Ground Biomass (AGB) and Mangrove Area based on various environmental factors.
 
@@ -67,7 +63,6 @@ This dashboard presents the analysis of mangrove cover and biomass in **Taman Na
 This comprehensive approach provides valuable insights into the health and trends of mangrove ecosystems over the years, supporting conservation and management efforts in the region.
 """)
 
-# Sidebar Image
 st.sidebar.image(
     "assets/Binus-logo.png",  # Replace with your image path
     width=100       
@@ -75,20 +70,13 @@ st.sidebar.image(
 
 # ----------------------------- Sidebar Controls with Input Validation and Reset ----------------------------- #
 
-# Add Sidebar Header
+
 st.sidebar.header("Dashboard Controls")
-
-# Define available years
 years = [2019, 2020, 2021, 2022, 2023]
-
-# Separate selection for map comparisons
 st.sidebar.header("Map Year Selection")
-
-# Function to get available years excluding the selected one
 def get_available_years(selected_year):
     return [year for year in years if year != selected_year]
 
-# Selection for Year 1
 map_year1 = st.sidebar.selectbox(
     "Select Year for Left Map",
     options=years,
@@ -97,7 +85,6 @@ map_year1 = st.sidebar.selectbox(
     help="Select the year to display on the left map."
 )
 
-# Selection for Year 2 with dynamic options based on Year 1 selection
 available_years_map2 = get_available_years(map_year1)
 map_year2 = st.sidebar.selectbox(
     "Select Year for Right Map",
@@ -107,7 +94,6 @@ map_year2 = st.sidebar.selectbox(
     help="Select a different year to display on the right map."
 )
 
-# Error Handling: Ensure Year 2 is not same as Year 1
 if map_year1 == map_year2:
     st.sidebar.error("Left and Right Map years must be different. Please select distinct years.")
 
@@ -210,7 +196,6 @@ def create_legend_image(title, min_val, max_val, colors, orientation='horizontal
     ax.imshow(gradient, aspect='auto', cmap=cmap, extent=extent)
     ax.set_axis_off()
     
-    # Add title and labels with white color for min and max
     fig.text(0.5, 0.9, title, ha='center', va='center', fontsize=10, weight='bold', color='black')
     if orientation == 'horizontal':
         fig.text(0.0, 0.5, f"{min_val}", ha='left', va='center', fontsize=8, color='white')
@@ -219,7 +204,6 @@ def create_legend_image(title, min_val, max_val, colors, orientation='horizontal
         fig.text(0.5, 0.0, f"{min_val}", ha='center', va='bottom', fontsize=8, color='white')
         fig.text(0.5, 1.0, f"{max_val}", ha='center', va='top', fontsize=8, color='white')
     
-    # Save the figure to a BytesIO object
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
     plt.close(fig)
@@ -228,8 +212,6 @@ def create_legend_image(title, min_val, max_val, colors, orientation='horizontal
 
 # ----------------------------- Sidebar Legends ----------------------------- #
 st.sidebar.header("Legends")
-
-# Legend for AGB (C Ton/Ha)
 st.sidebar.subheader("AGB (C Ton/Ha)")
 agb_colors = ['yellow', 'green', 'darkgreen']
 agb_legend = create_legend_image(
@@ -243,7 +225,6 @@ agb_legend = create_legend_image(
 )
 st.sidebar.image(agb_legend, use_container_width=True)
 
-# Legend for AGB Trend (Ton/year)
 st.sidebar.subheader("AGB Trend (Ton/year)")
 trend_ton_colors = ['orange', 'white', 'blue']
 trend_ton_legend = create_legend_image(
@@ -257,7 +238,6 @@ trend_ton_legend = create_legend_image(
 )
 st.sidebar.image(trend_ton_legend, use_container_width=True)
 
-# Legend for AGB Trend (%/year)
 st.sidebar.subheader("AGB Trend (%/year)")
 trend_percent_colors = ['orange', 'white', 'blue']
 trend_percent_legend = create_legend_image(
@@ -280,17 +260,14 @@ def load_data(export_folder='GEE_exports'):
     feature_importances_path = os.path.join(export_folder, 'feature_importances.csv')
     scatter_plot_path = os.path.join(export_folder, 'scatter_plot_data.csv')
     trend_df_path = os.path.join(export_folder, 'agb_trend.csv')
-    # prediction_path is no longer needed since we'll compute it dynamically
-    
-    # Load CSVs if they exist; otherwise, return empty DataFrames
+
     mangrove_df = pd.read_csv(mangrove_path) if os.path.exists(mangrove_path) else pd.DataFrame()
     agb_df = pd.read_csv(agb_totals_path) if os.path.exists(agb_totals_path) else pd.DataFrame()
     feature_importances_df = pd.read_csv(feature_importances_path) if os.path.exists(feature_importances_path) else pd.DataFrame()
     scatter_df = pd.read_csv(scatter_plot_path) if os.path.exists(scatter_plot_path) else pd.DataFrame()
     trend_df = pd.read_csv(trend_df_path) if os.path.exists(trend_df_path) else pd.DataFrame()
-    # prediction_df will be computed dynamically
     
-    return mangrove_df, agb_df, feature_importances_df, scatter_df, trend_df  # Removed prediction_df
+    return mangrove_df, agb_df, feature_importances_df, scatter_df, trend_df
 
 # ----------------------------- Initialize Temporary Directory ----------------------------- #
 def initialize_temp_dir():
