@@ -25,10 +25,9 @@ from sklearn.metrics import r2_score
 warnings.filterwarnings("ignore")
 
 # ----------------------------- Initialization ----------------------------- #
-
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Mangrove Analysis Dashboard - Random Forest Model",
+    page_title="Mangrove Analysis Dashboard in Taman Nasional Sembilang, South Sumatera, Indonesia from 2019 to 2023",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -40,41 +39,91 @@ if 'zoom_level' not in st.session_state:
     st.session_state.zoom_level = 10
 if 'initial_load' not in st.session_state:
     st.session_state.initial_load = True
+if 'map_year1' not in st.session_state:
+    st.session_state.map_year1 = 2019
+if 'map_year2' not in st.session_state:
+    st.session_state.map_year2 = 2023
+if 'temp_dir' not in st.session_state:
+    st.session_state.temp_dir = tempfile.mkdtemp()
 
-# Title and Description
-st.title("Mangrove Analysis Dashboard - Random Forest Model")
+# Title
+st.title("Mangrove Analysis Dashboard in Taman Nasional Sembilang, South Sumatera, Indonesia from 2019 to 2023")
+
+# Enhanced Description with Dataset References
 st.markdown("""
-This dashboard presents the analysis of mangrove cover and biomass in **Taman Nasional Sembilang**, South Sumatera, Indonesia from **2019 to 2023**.
+This dashboard presents the analysis of mangrove cover and biomass in **Taman Nasional Sembilang**, South Sumatera, Indonesia from **2019 to 2023**. Utilizing a **Random Forest** model, the dashboard predicts Above-Ground Biomass (AGB) and Mangrove Area based on various environmental factors.
+
+### Data Sources:
+- **Satellite Imagery**:
+  - **Sentinel-2**: Utilizes the `COPERNICUS/S2_SR_HARMONIZED` collection for high-resolution optical imagery.
+  - **Cloud Masking**: Employs the `GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED` collection to assess and mitigate cloud cover effects.
+- **LiDAR Data**:
+  - **GEDI**: Incorporates the `LARSE/GEDI/GEDI04_A_002_MONTHLY` ImageCollection for detailed canopy structure and biomass estimation.
+- **Ground Measurements**: Includes in-situ data for calibration and validation of remote sensing estimates.
+### Key Features:
+- **Above-Ground Biomass (AGB) Prediction**: Leveraging GEDI LiDAR data and Sentinel-2 imagery to estimate biomass with high precision.
+- **Mangrove Area Mapping**: Analyzing temporal changes in mangrove cover using harmonized Sentinel-2 data.
+
+This comprehensive approach provides valuable insights into the health and trends of mangrove ecosystems over the years, supporting conservation and management efforts in the region.
 """)
 
-# Sidebar Controls
+# Sidebar Image
+st.sidebar.image(
+    "assets/Binus-logo.png",  # Replace with your image path
+    width=100       
+)
+
+# ----------------------------- Sidebar Controls with Input Validation and Reset ----------------------------- #
+
+# Add Sidebar Header
 st.sidebar.header("Dashboard Controls")
 
 # Define available years
 years = [2019, 2020, 2021, 2022, 2023]
 
-# Removed the multiselect for filtering charts
-# If you have other controls, you can add them here
-
 # Separate selection for map comparisons
 st.sidebar.header("Map Year Selection")
+
+# Function to get available years excluding the selected one
+def get_available_years(selected_year):
+    return [year for year in years if year != selected_year]
+
+# Selection for Year 1
 map_year1 = st.sidebar.selectbox(
     "Select Year for Left Map",
     options=years,
-    index=0
+    index=years.index(st.session_state.map_year1),
+    key='map_year1',
+    help="Select the year to display on the left map."
 )
+
+# Selection for Year 2 with dynamic options based on Year 1 selection
+available_years_map2 = get_available_years(map_year1)
 map_year2 = st.sidebar.selectbox(
     "Select Year for Right Map",
-    options=years,
-    index=len(years)-1
+    options=available_years_map2,
+    index=available_years_map2.index(st.session_state.map_year2) if st.session_state.map_year2 in available_years_map2 else 0,
+    key='map_year2',
+    help="Select a different year to display on the right map."
 )
 
-# ----------------------------- Helper Functions ----------------------------- #
+# Error Handling: Ensure Year 2 is not same as Year 1
+if map_year1 == map_year2:
+    st.sidebar.error("Left and Right Map years must be different. Please select distinct years.")
 
+# ----------------------------- Helper Functions ----------------------------- #
 def create_custom_colormap():
     """Create a custom colormap for visualization."""
     colors_list = ['orange', 'white', 'blue']
     return LinearSegmentedColormap.from_list('custom_diverging', colors_list, N=256)
+
+def create_custom_green_scale():
+    """Create a custom green color scale from light green to dark green."""
+    return [
+        [0.0, 'lightgreen'],
+        [0.5, 'green'],
+        [1.0, 'darkgreen']
+    ]
 
 custom_cmap = create_custom_colormap()
 
@@ -138,7 +187,6 @@ def add_image_overlay(map_obj, image, bounds, name, opacity=1):
 def create_legend_image(title, min_val, max_val, colors, orientation='horizontal', width=300, height=50):
     """
     Create a gradient legend image.
-
     Parameters:
     - title (str): Title of the legend.
     - min_val (float): Minimum value.
@@ -147,7 +195,6 @@ def create_legend_image(title, min_val, max_val, colors, orientation='horizontal
     - orientation (str): 'horizontal' or 'vertical'.
     - width (int): Width of the image in pixels.
     - height (int): Height of the image in pixels.
-
     Returns:
     - BytesIO object containing the image.
     """
@@ -180,7 +227,6 @@ def create_legend_image(title, min_val, max_val, colors, orientation='horizontal
     return buf
 
 # ----------------------------- Sidebar Legends ----------------------------- #
-
 st.sidebar.header("Legends")
 
 # Legend for AGB (C Ton/Ha)
@@ -226,7 +272,6 @@ trend_percent_legend = create_legend_image(
 st.sidebar.image(trend_percent_legend, use_container_width=True)
 
 # ----------------------------- Load Exported Data ----------------------------- #
-
 @st.cache_data
 def load_data(export_folder='GEE_exports'):
     """Load exported CSV data from the specified folder."""
@@ -248,7 +293,6 @@ def load_data(export_folder='GEE_exports'):
     return mangrove_df, agb_df, feature_importances_df, scatter_df, trend_df  # Removed prediction_df
 
 # ----------------------------- Initialize Temporary Directory ----------------------------- #
-
 def initialize_temp_dir():
     """Initialize a temporary directory for storing image overlays."""
     if 'temp_dir' not in st.session_state:
@@ -263,7 +307,6 @@ initialize_temp_dir()
 atexit.register(cleanup_temp_dir)
 
 # ----------------------------- Map Visualization Functions ----------------------------- #
-
 def create_agb_comparison_map(center, zoom, export_folder, year1, year2):
     """Create a dual map comparing AGB between two selected years."""
     dual_map = DualMap(
@@ -355,13 +398,11 @@ def create_trend_comparison_map(center, zoom, export_folder):
     return dual_map
 
 # ----------------------------- Main Application ----------------------------- #
-
 # Use a spinner for the entire application content
 with st.spinner("Loading data and components... Please wait..."):
     # Load data
     export_folder = 'GEE_exports'
     mangrove_df, agb_df, feature_importances_df, scatter_df, trend_df = load_data(export_folder)
-
     # Initialize containers to hold different sections
     map_section = st.container()
     charts_section = st.container()
@@ -373,7 +414,6 @@ with st.spinner("Loading data and components... Please wait..."):
     download_section = st.container()
 
 # ----------------------------- Map Visualization Section ----------------------------- #
-
 with map_section:
     st.header("Map Visualizations")
     
@@ -432,7 +472,6 @@ with map_section:
         st.error(f"Error displaying the trend comparison map: {str(e)}")
 
 # ----------------------------- Charts Section ----------------------------- #
-
 with charts_section:
     st.header("Mangrove and Biomass Trends Prediction")
     
@@ -443,9 +482,8 @@ with charts_section:
     with col1:
         st.subheader("Mangrove Cover Area Over Time")
         if not mangrove_df.empty:
-            # No filtering based on selected_years; display all data
             filtered_mangrove_df = mangrove_df
-            
+
             if not filtered_mangrove_df.empty:
                 with st.spinner("Generating Mangrove Area chart..."):
                     fig1 = px.bar(
@@ -455,7 +493,7 @@ with charts_section:
                         title='Mangrove Cover Area Over Time',
                         labels={'Mangrove Area (Ha)': 'Mangrove Area (Ha)', 'Year': 'Year'},
                         color='Mangrove Area (Ha)',
-                        color_continuous_scale='Viridis',
+                        color_continuous_scale=create_custom_green_scale(),  # Using custom scale
                         template='plotly_white',
                         text_auto=True
                     )
@@ -476,9 +514,8 @@ with charts_section:
     with col2:
         st.subheader("Above-Ground Biomass (AGB) Over Time")
         if not agb_df.empty:
-            # No filtering based on selected_years; display all data
             filtered_agb_df = agb_df
-            
+
             if not filtered_agb_df.empty:
                 with st.spinner("Generating AGB chart..."):
                     fig2 = px.bar(
@@ -488,7 +525,7 @@ with charts_section:
                         title='Above-Ground Biomass (AGB) Over Time',
                         labels={'AGB (C Ton)': 'AGB (C Ton)', 'Year': 'Year'},
                         color='AGB (C Ton)',
-                        color_continuous_scale='Plasma',
+                        color_continuous_scale=create_custom_green_scale(),  # Using custom scale
                         template='plotly_white',
                         text_auto=True
                     )
@@ -506,11 +543,10 @@ with charts_section:
             st.write("No AGB data available.")
 
 # ----------------------------- Prediction Visualization ----------------------------- #
-
 with prediction_section:
     st.header("AGB Prediction for 2024")
     
-    # ### Addition: Compute 2024 AGB Prediction
+    # ### Compute 2024 AGB Prediction
     # Since `agb_prediction_2024.csv` is not available, we'll compute the prediction based on existing AGB data and trend.
     
     if not trend_df.empty and not agb_df.empty:
@@ -538,7 +574,7 @@ with prediction_section:
         st.warning("Insufficient data to compute 2024 AGB prediction.")
         agb_prediction_df = pd.DataFrame()
     
-    # ### Addition: Compute 2024 Mangrove Area Prediction
+    # ### Compute 2024 Mangrove Area Prediction
     # We'll use Linear Regression to predict the Mangrove Area for 2024 based on historical data.
     
     if not mangrove_df.empty and len(mangrove_df) >= 2:
@@ -567,7 +603,7 @@ with prediction_section:
         st.warning("Insufficient data to compute 2024 Mangrove Area prediction.")
         mangrove_prediction_df = pd.DataFrame()
     
-    # ### Addition: AGB Prediction Visualization
+    # ### AGB Prediction Visualization
     
     if not agb_prediction_df.empty:
         try:
@@ -617,12 +653,17 @@ with prediction_section:
             with st.spinner("Rendering AGB prediction chart..."):
                 st.plotly_chart(fig_prediction, use_container_width=True)
             
+            # Display Model Accuracy (R² Score)
+            if 'model_r2' in st.session_state:
+                r2 = st.session_state.model_r2
+                st.markdown(f"**Model Accuracy (R² Score): {r2:.3f}**")  # Added Accuracy Percentage
+            
         except Exception as e:
             st.error(f"Error displaying the 2024 AGB prediction: {e}")
     else:
         st.warning("No AGB prediction data available for 2024.")
     
-    # ### Addition: Mangrove Area Prediction Visualization
+    # ### Mangrove Area Prediction Visualization
     
     st.header("Mangrove Area Prediction for 2024")
     
@@ -679,9 +720,13 @@ with prediction_section:
         st.warning("No Mangrove Area prediction data available for 2024.")
 
 # ----------------------------- Model Validation ----------------------------- #
-
 with validation_section:
     st.header("Model Validation: AGB Reference vs Prediction")
+    
+    # Retrieve sample size information from session state
+    n = st.session_state.model_n if 'model_n' in st.session_state else None
+    n_test = st.session_state.model_n_test if 'model_n_test' in st.session_state else None
+    
     if not scatter_df.empty:
         # No filtering based on selected_years; display all data
         filtered_scatter_df = scatter_df
@@ -737,7 +782,6 @@ with validation_section:
         st.write("No scatter plot data available.")
 
 # ----------------------------- Feature Importances and Model Performance ----------------------------- #
-
 with feature_importance_section:
     # Feature Importances
     st.sidebar.subheader("Model Feature Importances")
@@ -790,6 +834,10 @@ with model_performance_section:
                 with st.spinner("Calculating Model R² Score..."):
                     r2 = r2_score(filtered_scatter_df['AGB'], filtered_scatter_df['Prediction'])
                 st.sidebar.metric("Model R² Score", f"{r2:.3f}")
+                # Set session state for use in other sections
+                st.session_state.model_r2 = r2
+                st.session_state.model_n = len(filtered_scatter_df)
+                st.session_state.model_n_test = len(filtered_scatter_df)  # Assuming all are test samples
             else:
                 st.sidebar.write("Insufficient data to calculate R² score.")
         except Exception as e:
@@ -798,7 +846,6 @@ with model_performance_section:
         st.sidebar.write("No scatter plot data available to calculate R² score.")
 
 # ----------------------------- Additional Enhancements ----------------------------- #
-
 with additional_sections:
     # AGB Trend Over Time
     st.subheader("AGB Trend Over Time")
@@ -932,7 +979,7 @@ with additional_sections:
                     else:
                         st.warning("Insufficient data to compute additional statistics.")
                 
-                #2024
+                #2024 Predictions
                 if not agb_prediction_df.empty and not mangrove_prediction_df.empty:
                     predicted_year_agb = agb_prediction_df['Year'].iloc[0]
                     predicted_agb = agb_prediction_df['Predicted AGB (C Ton)'].iloc[0]
@@ -962,75 +1009,131 @@ with additional_sections:
         st.write("Insufficient data to display AGB trend information.")
 
 # ----------------------------- Download Options ----------------------------- #
-
 with download_section:
     st.header("Download Data")
-    
-    # Download Mangrove Data
-    if not mangrove_df.empty:
-        with st.spinner("Preparing Mangrove Data for download..."):
-            csv_mangrove = mangrove_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Mangrove Data as CSV",
-            data=csv_mangrove,
-            file_name='mangrove_data.csv',
-            mime='text/csv',
-        )
+
+    # Define the paths to the original CSV files
+    mangrove_file = os.path.join(export_folder, 'mangrove_area.csv')
+    agb_file = os.path.join(export_folder, 'agb_totals.csv')
+    feature_importances_file = os.path.join(export_folder, 'feature_importances.csv')
+    scatter_plot_file = os.path.join(export_folder, 'scatter_plot_data.csv')
+    trend_file = os.path.join(export_folder, 'agb_trend.csv')
+
+    # Function to read a file and return bytes
+    def get_file_bytes(file_path):
+        try:
+            with open(file_path, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            st.error(f"Error reading {os.path.basename(file_path)}: {e}")
+            return None
+
+    # Download Mangrove Area Data
+    if os.path.exists(mangrove_file):
+        mangrove_bytes = get_file_bytes(mangrove_file)
+        if mangrove_bytes:
+            st.download_button(
+                label="📥 Download Mangrove Area Data (mangrove_area.csv)",
+                data=mangrove_bytes,
+                file_name='mangrove_area.csv',
+                mime='text/csv',
+            )
     else:
-        st.write("No mangrove data available for download.")
-    
-    # Download AGB Data
-    if not agb_df.empty:
-        with st.spinner("Preparing AGB Data for download..."):
-            csv_agb = agb_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download AGB Data as CSV",
-            data=csv_agb,
-            file_name='agb_data.csv',
-            mime='text/csv',
-        )
+        st.warning("Mangrove Area Data (mangrove_area.csv) not found.")
+
+    # Download AGB Totals Data
+    if os.path.exists(agb_file):
+        agb_bytes = get_file_bytes(agb_file)
+        if agb_bytes:
+            st.download_button(
+                label="📥 Download AGB Totals Data (agb_totals.csv)",
+                data=agb_bytes,
+                file_name='agb_totals.csv',
+                mime='text/csv',
+            )
     else:
-        st.write("No AGB data available for download.")
-    
+        st.warning("AGB Totals Data (agb_totals.csv) not found.")
+
+    # Download Feature Importances Data
+    if os.path.exists(feature_importances_file):
+        feature_importances_bytes = get_file_bytes(feature_importances_file)
+        if feature_importances_bytes:
+            st.download_button(
+                label="📥 Download Feature Importances Data (feature_importances.csv)",
+                data=feature_importances_bytes,
+                file_name='feature_importances.csv',
+                mime='text/csv',
+            )
+    else:
+        st.warning("Feature Importances Data (feature_importances.csv) not found.")
+
     # Download Scatter Plot Data
-    if not scatter_df.empty:
-        with st.spinner("Preparing Scatter Plot Data for download..."):
-            csv_scatter = scatter_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Scatter Plot Data as CSV",
-            data=csv_scatter,
-            file_name='scatter_plot_data.csv',
-            mime='text/csv',
-        )
+    if os.path.exists(scatter_plot_file):
+        scatter_plot_bytes = get_file_bytes(scatter_plot_file)
+        if scatter_plot_bytes:
+            st.download_button(
+                label="📥 Download Scatter Plot Data (scatter_plot_data.csv)",
+                data=scatter_plot_bytes,
+                file_name='scatter_plot_data.csv',
+                mime='text/csv',
+            )
     else:
-        st.write("No scatter plot data available for download.")
-    
-    # ### Addition: Download Prediction Data
+        st.warning("Scatter Plot Data (scatter_plot_data.csv) not found.")
+
+    # Download AGB Trend Data
+    if os.path.exists(trend_file):
+        trend_bytes = get_file_bytes(trend_file)
+        if trend_bytes:
+            st.download_button(
+                label="📥 Download AGB Trend Data (agb_trend.csv)",
+                data=trend_bytes,
+                file_name='agb_trend.csv',
+                mime='text/csv',
+            )
+    else:
+        st.warning("AGB Trend Data (agb_trend.csv) not found.")
+
+    # ### Download Prediction Data
     # Allow users to download the dynamically generated 2024 prediction data.
-    
+
     if not agb_prediction_df.empty:
-        with st.spinner("Preparing 2024 AGB Prediction Data for download..."):
-            csv_agb_prediction = agb_prediction_df.to_csv(index=False).encode('utf-8')
+        agb_prediction_csv = agb_prediction_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download 2024 AGB Prediction Data as CSV",
-            data=csv_agb_prediction,
+            data=agb_prediction_csv,
             file_name='agb_prediction_2024.csv',
             mime='text/csv',
         )
     else:
         st.write("No AGB prediction data available for download.")
+
     if not mangrove_prediction_df.empty:
-        with st.spinner("Preparing 2024 Mangrove Area Prediction Data for download..."):
-            csv_mangrove_prediction = mangrove_prediction_df.to_csv(index=False).encode('utf-8')
+        mangrove_prediction_csv = mangrove_prediction_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download 2024 Mangrove Area Prediction Data as CSV",
-            data=csv_mangrove_prediction,
+            data=mangrove_prediction_csv,
             file_name='mangrove_area_prediction_2024.csv',
             mime='text/csv',
         )
     else:
         st.write("No Mangrove Area prediction data available for download.")
 
-# ----------------------------- Cleanup Temporary Files ----------------------------- #
+    # ----------------------------- Add References ----------------------------- #
+    st.header("References")
+    
+    references = """
+    1. Li, Huiying, Jia, M., Zhang, R., Ren, Y., & Wen, X. (2019). Incorporating the plant phenological trajectory into mangrove species mapping with dense time series sentinel-2 imagery and the Google Earth Engine Platform. *Remote Sensing*, 11(21), 2479. [https://doi.org/10.3390/rs11212479](https://doi.org/10.3390/rs11212479)
+    
+    2. Hu, T., Zhang, Y., Su, Y., Zheng, Y., Lin, G., & Guo, Q. (2020). Mapping the global mangrove forest aboveground biomass using multisource remote sensing data. *Remote Sensing*, 12(10), 1690. [https://doi.org/10.3390/rs12101690](https://doi.org/10.3390/rs12101690)
+    
+    3. Jing, C., Du, M., Li, S., & Liu, S. (2019). Geospatial dashboards for Monitoring Smart City Performance. *Sustainability*, 11(20), 5648. [https://doi.org/10.3390/su11205648](https://doi.org/10.3390/su11205648)
+    
+    4. Zeng, J., Ai, B., Jian, Z., Ye, M., Zhao, J., & Sun, S. (2023). Analysis of Mangrove Dynamics and its protection effect in the Guangdong-hong kong-macao Coastal Area based on the Google Earth Engine Platform. *Frontiers in Marine Science*, 10. [https://doi.org/10.3389/fmars.2023.1170587](https://doi.org/10.3389/fmars.2023.1170587)
+    
+    5. Mateo-García, G., Gómez-Chova, L., Amorós-López, J., Muñoz-Marí, J., & Camps-Valls, G. (2018). Multitemporal cloud masking in the Google Earth Engine. *Remote Sensing*, 10(7), 1079. [https://doi.org/10.3390/rs10071079](https://doi.org/10.3390/rs10071079)
+    """
+    
+    st.markdown(references)
 
+# ----------------------------- Cleanup Temporary Files ----------------------------- #
 # Note: Temporary files are managed via st.session_state.temp_dir and cleaned up using atexit.
